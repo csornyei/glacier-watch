@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_USER: glacier_user
+      POSTGRES_PASSWORD: glacier_pass
+      POSTGRES_DB: glacier_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+  adminer:
+    image: adminer
+    ports:
+      - "8080:8080"
+volumes:
+  postgres_data:

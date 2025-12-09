@@ -1,0 +1,6 @@
+project_id: kebnekaise
+bands:
+  B04_20m
+  B03_20m
+  B02_20m
+  B11_20m
