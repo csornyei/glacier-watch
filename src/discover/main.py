@@ -5,11 +5,11 @@ from pathlib import Path
 from shapely.geometry import shape
 
 from src.utils.config import load_project_config
-from src.utils.db import get_session
 from src.utils.file import load_feature_from_geojson
 from src.utils.logger import get_logger
 from src.utils.models import Scene
 from src.utils.stac import Stac
+from src.controller.scene import SceneController
 
 logger = get_logger("glacier_watch.discover")
 
@@ -57,41 +57,40 @@ if __name__ == "__main__":
         date_to=args.date_to,
     )
 
-    with get_session() as session:
-        for scene_info in files:
-            scene_id = scene_info.id
-            print(f"Scene ID: {scene_id}")
-            scene_geometry = shape(scene_info.geometry)
+    scenes = []
 
-            if not polygon.within(scene_geometry):
-                logger.warning(
-                    f"Scene {scene_id} does not fully cover the AOI. Skipping."
-                )
-                continue
+    scene_ids = [scene.id for scene in files]
 
-            props = scene_info.properties
+    existing_scenes = SceneController.get_scenes_by_ids(scene_ids)
+    existing_scene_ids = {scene.scene_id for scene in existing_scenes}
 
-            existing_scene = session.get(Scene, scene_id)
-            if existing_scene:
-                logger.info(
-                    f"Scene {scene_id} already exists in the database. Skipping."
-                )
-                continue
-            items = {
-                asset_key: Stac.parse_asset_href(asset)
-                for asset_key, asset in scene_info.assets.items()
-                if asset_key in project_config["bands"]
-            }
-            logger.info(f"Assets to download: {items}")
+    files = [scene for scene in files if scene.id not in existing_scene_ids]
 
-            new_scene = Scene(
-                scene_id=scene_id,
-                project_id=args.project_id,
-                stac_href=json.dumps(items),
-                acquisition_date=props.get("datetime"),
-                status="queued_for_download",
-            )
-            session.add(new_scene)
-            logger.info(f"Added scene {scene_id} to the database.")
+    for scene_info in files:
+        scene_id = scene_info.id
+        scene_geometry = shape(scene_info.geometry)
 
-        session.commit()
+        if not polygon.within(scene_geometry):
+            logger.warning(f"Scene {scene_id} does not fully cover the AOI. Skipping.")
+            continue
+
+        props = scene_info.properties
+
+        items = {
+            asset_key: Stac.parse_asset_href(asset)
+            for asset_key, asset in scene_info.assets.items()
+            if asset_key in project_config["bands"]
+        }
+        logger.info(f"Assets to download: {items}")
+
+        new_scene = Scene(
+            scene_id=scene_id,
+            project_id=args.project_id,
+            stac_href=json.dumps(items),
+            acquisition_date=props.get("datetime"),
+            status="queued_for_download",
+        )
+        scenes.append(new_scene)
+        logger.info(f"Added scene {scene_id} to the database.")
+
+    SceneController.add_scenes(scenes)

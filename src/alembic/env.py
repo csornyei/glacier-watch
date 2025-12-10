@@ -2,13 +2,13 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
-from sqlmodel import SQLModel
+
 from src.utils.config import config as app_config
 
 from alembic import context
 from geoalchemy2 import alembic_helpers
 
-from src.utils.models import Project, Scene  # noqa: F401
+from src.utils.models import Project, Scene, Base  # noqa: F401
 
 config = context.config
 
@@ -19,7 +19,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-target_metadata = SQLModel.metadata
+target_metadata = Base.metadata
 
 
 def include_object(object, name, type_, reflected, compare_to):

@@ -10,9 +10,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from geoalchemy2 import Geometry
-from sqlalchemy.dialects import postgresql
-import sqlmodel
+
 
 # revision identifiers, used by Alembic.
 revision: str = "b9cd3d641b0a"
@@ -26,17 +24,17 @@ def upgrade() -> None:
 
     op.create_table(
         "project",
-        sa.Column("project_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("name", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("description", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("project_id", sa.String(), nullable=False),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("description", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("project_id"),
     )
     op.create_table(
         "scene",
-        sa.Column("scene_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("project_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("stac_href", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
+        sa.Column("scene_id", sa.String(), nullable=False),
+        sa.Column("project_id", sa.String(), nullable=False),
+        sa.Column("stac_href", sa.String(), nullable=False),
         sa.Column("acquisition_date", sa.DateTime(), nullable=False),
         sa.Column(
             "status",
@@ -54,11 +52,11 @@ def upgrade() -> None:
             ),
             nullable=False,
         ),
-        sa.Column("download_path", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
-        sa.Column("result_path", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("download_path", sa.String(), nullable=True),
+        sa.Column("result_path", sa.String(), nullable=True),
         sa.Column("attempts_download", sa.Integer(), nullable=False),
         sa.Column("attempts_processing", sa.Integer(), nullable=False),
-        sa.Column("last_error", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
+        sa.Column("last_error", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(

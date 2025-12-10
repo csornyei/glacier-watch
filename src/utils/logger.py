@@ -62,6 +62,26 @@ def add_log_context(**kwargs: Any) -> None:
     context_filter.update_context(**kwargs)
 
 
+def remove_log_context(*args: str) -> None:
+    """Remove context keys from the log records
+
+    Args:
+        *args: The context keys to remove
+
+    Example:
+        >>> my_logger = get_logger("my_logger")
+        >>> add_log_context(user_id=42)
+        >>> my_logger.info("Hello, world!")
+        {"asctime": "2021-10-01T12:00:00", "levelname": "INFO", "name": "my_logger", "funcName": "my_function", "location": "my_file.py:42", "message": "Hello, world!", "user_id": 42}
+        >>> remove_log_context("user_id")
+        >>> my_logger.info("Hello again!")
+        {"asctime": "2021-10-01T12:00:01", "levelname": "INFO", "name": "my_logger", "funcName": "my_function", "location": "my_file.py:43", "message": "Hello again!"}
+    """
+    for key in args:
+        if key in context_filter.context:
+            del context_filter.context[key]
+
+
 def _get_stream_handler() -> logging.StreamHandler:
     """Get a stream handler for logging to the console"""
     stream_handler = logging.StreamHandler()

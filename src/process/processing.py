@@ -46,10 +46,9 @@ def snow_area_by_glaciers(ndsi_mask: xr.DataArray, glaciers: gpd.GeoDataFrame) -
     glacier_snow = {}
 
     for _, glacier in glaciers.iterrows():
-        glacier_id = glacier["rgi_id"]
-        glacier_name = glacier["glac_name"]
-        glacier_og_area = glacier["area_km2"]
-        glacier_og_area *= 1_000_000  # Convert km2 to m2
+        glacier_id = glacier["glacier_id"]
+        glacier_name = glacier["name"]
+        glacier_og_area = glacier["area_m2"]
 
         glacier_geom = glacier["geometry"]
         glacier_mask = ndsi_mask.rio.clip(
@@ -80,7 +79,7 @@ def snowline_calculation(
     snowline_elevations = {}
 
     for _, glacier in glaciers.iterrows():
-        glacier_id = glacier["rgi_id"]
+        glacier_id = glacier["glacier_id"]
         glacier_geom = glacier["geometry"]
 
         clipped_ndsi = ndsi_mask.rio.clip(
