@@ -24,9 +24,6 @@ class Config:
 
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./glacier_watch.db")
 
-    raw_data_folder: str = os.getenv("RAW_DATA_FOLDER", "./data/raw")
-    processed_data_folder: str = os.getenv("PROCESSED_DATA_FOLDER", "./data/processed")
-
 
 config = Config()
 

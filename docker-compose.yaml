@@ -13,5 +13,66 @@ services:
     image: adminer
     ports:
       - "8080:8080"
+
+  alembic:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://glacier_user:glacier_pass@postgres:5432/glacier_db
+    command: 
+      - "alembic"
+      - "upgrade"
+      - "head"
+    volumes:
+      - ./:/app
+
+  discover:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://glacier_user:glacier_pass@postgres:5432/glacier_db
+    command: 
+      - "python"
+      - "-m"
+      - "src.discover.main"
+      - "--project_id=kebnekaise"
+      - "--date_from=2020-01-01"
+      - "--date_to=2025-10-31"
+    volumes:
+      - ./data:/app/data
+
+  download:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://glacier_user:glacier_pass@postgres:5432/glacier_db
+      CDSE_USERNAME: your_cdse_username
+      CDSE_PASSWORD: your_cdse_password
+    command: 
+      - "python"
+      - "-m"
+      - "src.download.main"
+    volumes:
+      - ./data:/app/data
+
+  process:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://glacier_user:glacier_pass@postgres:5432/glacier_db
+    command: 
+      - "python"
+      - "-m"
+      - "src.process.main"
+    volumes:
+      - ./data:/app/data
+
+
+
 volumes:
   postgres_data:
+
