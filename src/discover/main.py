@@ -1,11 +1,13 @@
 import argparse
 from datetime import date, timedelta
 import json
-from pathlib import Path
+
+from shapely import MultiPolygon
+from geoalchemy2.shape import to_shape
 from shapely.geometry import shape
 
+from src.controller.project import ProjectController
 from src.utils.config import load_project_config
-from src.utils.file import load_feature_from_geojson
 from src.utils.logger import get_logger
 from src.utils.models import Scene
 from src.utils.stac import Stac
@@ -41,18 +43,15 @@ if __name__ == "__main__":
 
     stac = Stac(logger=logger)
 
-    aoi_geojson_path = Path(f"data/{args.project_id}/aoi.geojson")
+    project = ProjectController.get_project_by_id(args.project_id)
+    if not project:
+        logger.error(f"Project {args.project_id} not found.")
+        raise ValueError(f"Project {args.project_id} not found.")
 
-    if not aoi_geojson_path.is_file():
-        logger.error(f"GeoJSON file not found: {aoi_geojson_path}")
-        raise FileNotFoundError(f"GeoJSON file not found: {aoi_geojson_path}")
-
-    logger.info(f"Fetching data between {args.date_from} and {args.date_to}!")
-
-    polygon = load_feature_from_geojson(aoi_geojson_path, "EPSG:4326")
+    aoi_geometry = MultiPolygon(to_shape(project.area_of_interest))
 
     files = stac.search_sentinel2_data(
-        polygon=polygon,
+        polygon=aoi_geometry,
         date_from=args.date_from,
         date_to=args.date_to,
     )
@@ -70,7 +69,7 @@ if __name__ == "__main__":
         scene_id = scene_info.id
         scene_geometry = shape(scene_info.geometry)
 
-        if not polygon.within(scene_geometry):
+        if not aoi_geometry.within(scene_geometry):
             logger.warning(f"Scene {scene_id} does not fully cover the AOI. Skipping.")
             continue
 
