@@ -1,6 +1,7 @@
 from pathlib import Path
 from argparse import ArgumentParser
 from datetime import datetime
+from time import sleep
 
 import geopandas as gpd
 from shapely import MultiPolygon
@@ -15,14 +16,19 @@ from src.utils.db import get_session
 from src.utils.file import load_raster, prepare_folder
 from src.utils.config import CRS
 from src.utils.logger import get_logger, add_log_context
-from src.utils.models import SceneStatusEnum, GlaciersAnalysisResult, GlacierSnowData
+from src.utils.models import (
+    Scene,
+    SceneStatusEnum,
+    GlaciersAnalysisResult,
+    GlacierSnowData,
+)
 from src.controller.scene import SceneController
 from src.controller.project import ProjectController
 
 logger = get_logger("glacier_watch.process")
 
 
-def main(dry_run: bool = False):
+def main(dry_run: bool = False) -> tuple[bool, Scene]:
     try:
         if dry_run:
             logger.info("Dry run mode enabled. Fetching a scene without locking.")
@@ -37,7 +43,7 @@ def main(dry_run: bool = False):
 
         if not scene:
             logger.info("No scenes to process. Exiting.")
-            exit(0)
+            return False, None
 
         add_log_context(scene_id=scene.scene_id, project_id=scene.project_id)
 
@@ -165,7 +171,8 @@ def main(dry_run: bool = False):
             logger.info(
                 f"Snow outside glaciers: {total_snow_area - glacier_snow_area} m2"
             )
-
+        logger.info(f"Finished processing scene {scene.scene_id}.")
+        return True, scene
     except Exception as e:
         add_log_context(error_traceback=e.__traceback__)
         if dry_run:
@@ -179,6 +186,7 @@ def main(dry_run: bool = False):
                     SceneStatusEnum.failed_processing,
                     error_message=str(e),
                 )
+        return False, scene
 
 
 if __name__ == "__main__":
@@ -191,4 +199,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dry_run = args.dry_run
 
-    main(dry_run=dry_run)
+    while True:
+        success, scene = main(dry_run=dry_run)
+        if dry_run:
+            break
+        if not scene:
+            logger.warning(
+                "No scene to process. Waiting for 60 seconds before retrying."
+            )
+            sleep(60)
+        if not success:
+            logger.warning(
+                "An error occurred during processing. Retrying in 10 seconds."
+            )
+            sleep(10)
