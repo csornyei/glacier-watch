@@ -28,10 +28,10 @@ Glacier Watch is a reproducible data pipeline for monitoring seasonal snow cover
    1. create a new entry in the `project` table (requires a project_id, name and area_of_interest)
    2. create a folder in the `data` folder, named same as the `project_id`
    3. add a `config.yaml` which contains the bands to be retrieved (see example in `data/kebnekaise/config.yaml`)
-3. Retrieve `dem.tif` file automatically by running `src/dem/main.py` with the project_id argument
-4. Run `src/discover/main.py` to retrieve the available Sentinel-2 imagery between two dates
-5. Run `src/download/main.py` to download the raw images.
-6. Run `src/process/main.py` to compute glacier metrics.
+3. Retrieve `dem.tif` file automatically by running [dem](src/dem/main.py) with the project_id argument
+4. Run [discover](src/discover/main.py) to retrieve the available Sentinel-2 imagery between two dates
+5. Run [download](src/download/main.py) to download the raw images.
+6. Run [process](src/process/main.py) to compute glacier metrics.
 7. Access results via the API or UI.
 
 ## Outputs
