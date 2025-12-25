@@ -8,8 +8,10 @@ import rioxarray as rxr
 
 from src.controller.project import ProjectController
 from src.utils.logger import get_logger
-from src.utils.stac import DemStac
+from src.utils.dem_stac import DemStac
 from src.utils.geo import reproject_geom
+
+from src.dem.utils import clip_remote_geotiff_vsicurl, mosaic_clipped_tifs
 
 logger = get_logger("glacier_watch.discover")
 
@@ -53,6 +55,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    logger.info(f"Starting DEM download for project {args.project_id}")
+
+    logger.debug(f"Creating output directory for project {args.project_id}")
+
     output_dir = Path(f"data/{args.project_id}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,18 +67,43 @@ if __name__ == "__main__":
         logger.error(f"Project {args.project_id} not found.")
         raise ValueError(f"Project {args.project_id} not found.")
 
+    logger.info(f"Project found: {project.name}")
+
     aoi_geometry = to_shape(project.area_of_interest)
 
+    logger.debug(f"AOI Geometry: {aoi_geometry.wkt}")
+
     dem_stac = DemStac(logger)
-    dem_item = dem_stac.search_dem_data(aoi_geometry)
+    dem_items = dem_stac.search_dem_data(aoi_geometry)
 
-    with TemporaryDirectory() as tmpdir:
-        dem_path = dem_stac.download_dem_asset(
-            dem_item, download_path=f"{tmpdir}/dem.tif", asset_key="dem"
-        )
+    with TemporaryDirectory() as temp_dir:
+        clipped = []
+        for dem_item in dem_items:
+            logger.info(f"Downloading DEM item {dem_item.id}")
+            href = dem_item.assets["dem"].href
+            logger.info(f"  Href: {href}")
+            is_cog, info = dem_stac.is_cog(href)
+            if not is_cog:
+                logger.warning(f"  DEM item {dem_item.id} is not a COG. Info: {info}")
+            logger.info(f"  Is COG: {is_cog}, Info: {info}")
 
-        cut_dem_path = cut_dem_to_aoi(
-            output_path=f"data/{project.project_id}/dem.tif",
-            dem_path=dem_path,
-            aoi_geometry=aoi_geometry,
-        )
+            temp_output_path = Path(temp_dir) / f"{dem_item.id}.tif"
+            clipped_path = clip_remote_geotiff_vsicurl(
+                href,
+                aoi_geometry,
+                temp_output_path,
+                all_touched=True,
+                pad_pixels=2,
+            )
+            if clipped_path:
+                logger.info(f"  Clipped DEM saved to {clipped_path}")
+                clipped.append(clipped_path)
+
+        if not clipped:
+            logger.error("No DEM data could be clipped to the AOI.")
+            raise ValueError("No DEM data could be clipped to the AOI.")
+
+        final_output_path = output_dir / "dem.tif"
+
+        mosaic_clipped_tifs(clipped, final_output_path)
+        logger.info(f"Mosaic DEM saved to {final_output_path}")

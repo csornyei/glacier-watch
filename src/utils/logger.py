@@ -1,3 +1,4 @@
+import os
 import logging
 from typing import Any
 
@@ -82,15 +83,33 @@ def remove_log_context(*args: str) -> None:
             del context_filter.context[key]
 
 
-def _get_stream_handler() -> logging.StreamHandler:
+def _get_stream_handler(logLevel) -> logging.StreamHandler:
     """Get a stream handler for logging to the console"""
     stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
+    stream_handler.setLevel(logLevel)
 
     json_formatter = CustomJsonFormatter(_log_format)
 
     stream_handler.setFormatter(json_formatter)
     return stream_handler
+
+
+def __get_log_level() -> int:
+    logLevel = os.getenv("LOG_LEVEL", "INFO").upper()
+
+    match logLevel:
+        case "DEBUG":
+            return logging.DEBUG
+        case "INFO":
+            return logging.INFO
+        case "WARNING":
+            return logging.WARNING
+        case "ERROR":
+            return logging.ERROR
+        case "CRITICAL":
+            return logging.CRITICAL
+        case _:
+            return logging.INFO
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -102,11 +121,13 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         logging.Logger: The logger instance
     """
+    logLevel = __get_log_level()
+
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logLevel)
 
     logger.handlers.clear()
-    logger.addHandler(_get_stream_handler())
+    logger.addHandler(_get_stream_handler(logLevel=logLevel))
 
     logger.addFilter(context_filter)
 

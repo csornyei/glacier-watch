@@ -1,14 +1,12 @@
 from datetime import date
 from logging import Logger
-from typing import Tuple
 
 import requests
 from pystac_client import Client
-from shapely.geometry import Polygon, mapping, box, shape
+from shapely.geometry import Polygon, mapping
 from tqdm import tqdm
 
 from src.utils.config import config
-from src.utils.geo import reproject_geom
 
 
 class Stac:
@@ -106,94 +104,3 @@ class Stac:
             raise
 
         self.logger.info(f"Downloaded asset to {download_path}")
-
-
-class DemStac:
-    def __init__(self, logger):
-        self.catalog = Client.open(config.dem_stac_url)
-        self.logger = logger
-
-    def __get_item_proj_bbox_geom(self, item):
-        props = item.properties or {}
-        proj_code = props.get("proj:code")
-        proj_bbox = props.get("proj:bbox")
-        proj_geom = props.get("proj:geometry")
-
-        if not proj_code or not proj_bbox:
-            return None, None, None
-
-        if isinstance(proj_code, str) and proj_code.upper().startswith("EPSG:"):
-            epsg = int(proj_code.split(":")[1])
-        else:
-            epsg = int(proj_code)
-
-        item_bbox = box(*proj_bbox)
-
-        item_geom = None
-        if proj_geom:
-            try:
-                item_geom = shape(proj_geom)
-            except Exception:
-                item_geom = None
-
-        return epsg, item_bbox, item_geom
-
-    def __score_item(self, item) -> Tuple[float, str]:
-        props = item.properties or {}
-        data_perc = float(props.get("pgc:data_perc") or 0.0)
-        created = props.get("created") or ""
-        return (data_perc, created)
-
-    def search_dem_data(self, polygon):
-        search = self.catalog.search(
-            collections=["arcticdem-mosaics-v3.0-10m"],
-            bbox=polygon.bounds,
-        )
-        items = list(search.items())
-        self.logger.info(f"Found {len(items)} DEM items for the given polygon.")
-
-        candidates = []
-        for item in items:
-            epsg, item_bbox, item_geom = self.__get_item_proj_bbox_geom(item)
-            if not epsg or not item_bbox:
-                continue
-
-            poly_proj = reproject_geom(
-                polygon, source_crs="EPSG:4326", target_crs=f"EPSG:{epsg}"
-            )
-
-            if not item_bbox.intersects(poly_proj):
-                continue
-
-            if item_geom is not None:
-                if item_geom.covers(poly_proj):
-                    candidates.append(item)
-            else:
-                if item_bbox.covers(poly_proj):
-                    candidates.append(item)
-
-        if not candidates:
-            raise ValueError("No DEM items fully cover the given polygon area.")
-
-        candidates.sort(key=self.__score_item, reverse=True)
-        return candidates[0]
-
-    def download_dem_asset(self, item, download_path: str, asset_key: str = "dem"):
-        dem_asset = item.assets.get(asset_key)
-        if not dem_asset:
-            raise ValueError(f"DEM asset with key '{asset_key}' not found in item.")
-
-        asset_href = dem_asset.href
-
-        with requests.get(asset_href, stream=True) as response:
-            response.raise_for_status()
-            with open(download_path, "wb") as f:
-                for chunk in tqdm(
-                    response.iter_content(chunk_size=1024 * 1024),
-                    desc=f"Downloading DEM to {download_path}",
-                ):
-                    if chunk:
-                        f.write(chunk)
-
-        self.logger.info(f"Downloaded DEM asset to {download_path}")
-        return download_path
