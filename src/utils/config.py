@@ -24,6 +24,11 @@ class Config:
 
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./glacier_watch.db")
 
+    dem_stac_url: str = os.getenv(
+        "DEM_STAC_URL",
+        "https://stac.pgc.umn.edu/api/v1/",
+    )
+
 
 config = Config()
 

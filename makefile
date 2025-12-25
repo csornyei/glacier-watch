@@ -11,5 +11,8 @@ process:
 process-dr:
 	uv run python -m src.process.main --dry-run
 
+dem:
+	uv run python -m src.dem.main --project_id=kebnekaise
+
 db-init:
 	uv run python -m src.utils.db

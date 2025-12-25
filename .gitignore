@@ -12,5 +12,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/result/*
 !data/result/.gitkeep
+
 scratch/
 .env
+.DS_Store

@@ -71,7 +71,19 @@ services:
     volumes:
       - ./data:/app/data
 
-
+  dem:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+psycopg://glacier_user:glacier_pass@postgres:5432/glacier_db
+    command: 
+      - "python"
+      - "-m"
+      - "src.dem.main"
+      - "--project_id=kebnekaise"
+    volumes:
+      - ./data:/app/data
 
 volumes:
   postgres_data:

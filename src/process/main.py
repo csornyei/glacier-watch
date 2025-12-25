@@ -103,7 +103,7 @@ def main(dry_run: bool = False) -> tuple[bool, Scene]:
         total_snow_area, glacier_snow = snow_area_by_glaciers(ndsi_mask, gdf_glaciers)
 
         dem = load_raster(dem_file_path)
-        # reproject DEM to match NDVI mask CRS
+
         dem = dem.rio.reproject_match(ndsi_mask)
 
         snowline_elevations = snowline_calculation(gdf_glaciers, ndsi_mask, dem)
