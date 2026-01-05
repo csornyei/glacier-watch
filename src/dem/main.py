@@ -2,16 +2,16 @@ import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import rioxarray as rxr
 from geoalchemy2.shape import to_shape
 from shapely.geometry import mapping
-import rioxarray as rxr
 
 from src.controller.project import ProjectController
-from src.utils.logger import get_logger
+from src.dem.utils import clip_remote_geotiff_vsicurl, mosaic_clipped_tifs
+from src.utils.cog import is_cog
 from src.utils.dem_stac import DemStac
 from src.utils.geo import reproject_geom
-
-from src.dem.utils import clip_remote_geotiff_vsicurl, mosaic_clipped_tifs
+from src.utils.logger import get_logger
 
 logger = get_logger("glacier_watch.discover")
 
@@ -82,10 +82,10 @@ if __name__ == "__main__":
             logger.info(f"Downloading DEM item {dem_item.id}")
             href = dem_item.assets["dem"].href
             logger.info(f"  Href: {href}")
-            is_cog, info = dem_stac.is_cog(href)
-            if not is_cog:
+            is_cog_flag, info = is_cog(logger, href)
+            if not is_cog_flag:
                 logger.warning(f"  DEM item {dem_item.id} is not a COG. Info: {info}")
-            logger.info(f"  Is COG: {is_cog}, Info: {info}")
+            logger.info(f"  Is COG: {is_cog_flag}, Info: {info}")
 
             temp_output_path = Path(temp_dir) / f"{dem_item.id}.tif"
             clipped_path = clip_remote_geotiff_vsicurl(

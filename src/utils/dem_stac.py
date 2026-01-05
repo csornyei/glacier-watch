@@ -1,12 +1,12 @@
+from itertools import combinations
 from logging import Logger
 from typing import Tuple
-from itertools import combinations
 
 import requests
 from pystac_client import Client
 from shapely.geometry import box, shape
-from tqdm import tqdm
 from shapely.ops import unary_union
+from tqdm import tqdm
 
 from src.utils.config import config
 from src.utils.geo import reproject_geom
@@ -180,39 +180,6 @@ class DemStac:
             f"Selected {len(best_items)} DEM items to cover AOI with coverage {best_coverage:.4f}"
         )
         return best_items
-
-    def is_cog(self, href: str) -> bool:
-        info = {"accept_ranges": None, "content_type": None, "tiff_magic": None}
-
-        head_resp = requests.head(href, allow_redirects=True, timeout=15)
-        head_resp.raise_for_status()
-
-        info["accept_ranges"] = head_resp.headers.get("Accept-Ranges")
-        info["content_type"] = head_resp.headers.get("Content-Type")
-
-        range_resp = requests.get(
-            href,
-            headers={"Range": "bytes=0-3"},
-            stream=True,
-            timeout=15,
-        )
-        range_resp.raise_for_status()
-
-        header = range_resp.content
-        if (
-            header.startswith(b"II*\x00")
-            or header.startswith(b"MM\x00*")
-            or header.startswith(b"II+\x00")
-            or header.startswith(b"MM\x00+")
-        ):
-            info["tiff_magic"] = True
-        else:
-            info["tiff_magic"] = False
-            info["header_bytes"] = str(header)
-
-        is_cog = (info["accept_ranges"] == "bytes") and info["tiff_magic"] is True
-
-        return is_cog, info
 
     def download_dem_asset(self, item, download_path: str, asset_key: str = "dem"):
         dem_asset = item.assets.get(asset_key)

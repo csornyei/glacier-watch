@@ -1,14 +1,13 @@
 from pathlib import Path
 from typing import Literal
+
 import geopandas as gpd
 import rioxarray as rxr
 import xarray as xr
 from shapely.geometry import Polygon
 
-from src.utils.config import CRS
 
-
-def load_feature_from_geojson(file_path: str, crs: str = CRS) -> Polygon:
+def load_feature_from_geojson(file_path: str, crs: str) -> Polygon:
     gdf = gpd.read_file(file_path).to_crs(crs)
 
     geom = gdf.geometry.iloc[0]

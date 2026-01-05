@@ -1,13 +1,12 @@
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
 
 import numpy as np
 import rasterio
-
-from rasterio.merge import merge
 from rasterio.enums import Resampling
-from rasterio.windows import from_bounds
 from rasterio.features import geometry_mask
+from rasterio.merge import merge
+from rasterio.windows import from_bounds
 from shapely.geometry import mapping
 
 from src.utils.geo import reproject_geom

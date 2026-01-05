@@ -6,8 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CRS = "EPSG:32633"
-
 
 @dataclass
 class Config:
@@ -28,6 +26,8 @@ class Config:
         "DEM_STAC_URL",
         "https://stac.pgc.umn.edu/api/v1/",
     )
+
+    cloud_cover_threshold: float = float(os.getenv("CLOUD_COVER_THRESHOLD", "0.2"))
 
 
 config = Config()

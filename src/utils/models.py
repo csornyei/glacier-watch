@@ -1,9 +1,9 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy import Column, DateTime, String, ForeignKey, Enum, Integer, Float
 from geoalchemy2 import Geometry
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 

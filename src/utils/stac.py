@@ -19,7 +19,7 @@ class Stac:
             collections=["sentinel-2-l2a"],
             intersects=mapping(polygon),
             datetime=f"{date_from.isoformat()}/{date_to.isoformat()}",
-            query={"eo:cloud_cover": {"lt": 20}},
+            query={"eo:cloud_cover": {"lt": float(config.cloud_cover_threshold) * 100}},
         )
         items = list(search.items())
         self.logger.info(

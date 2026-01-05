@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 from typing import Any
 
 from pythonjsonlogger.json import JsonFormatter
@@ -94,8 +94,10 @@ def _get_stream_handler(logLevel) -> logging.StreamHandler:
     return stream_handler
 
 
-def __get_log_level() -> int:
-    logLevel = os.getenv("LOG_LEVEL", "INFO").upper()
+def __get_log_level(log_level: str = None) -> int:
+    logLevel = (
+        log_level.upper() if log_level else os.getenv("LOG_LEVEL", "INFO").upper()
+    )
 
     match logLevel:
         case "DEBUG":
@@ -112,16 +114,16 @@ def __get_log_level() -> int:
             return logging.INFO
 
 
-def get_logger(name: str) -> logging.Logger:
+def get_logger(name: str, log_level: str = None) -> logging.Logger:
     """Get a logger instance with a custom JSON formatter
 
     Args:
         name (str): The name of the logger
-
+        log_level (str, optional): The logging level. Defaults to None.
     Returns:
         logging.Logger: The logger instance
     """
-    logLevel = __get_log_level()
+    logLevel = __get_log_level(log_level)
 
     logger = logging.getLogger(name)
     logger.setLevel(logLevel)
