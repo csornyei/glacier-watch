@@ -1,11 +1,10 @@
 from typing import Optional
 
-
 from sqlalchemy import func
-from sqlalchemy.sql import update, select
+from sqlalchemy.sql import select, update
 
 from src.utils.db import get_session
-from src.utils.models import Project, Glacier
+from src.utils.models import Glacier, Project
 
 
 class ProjectController:

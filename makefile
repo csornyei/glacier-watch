@@ -5,7 +5,7 @@ discover:
 	uv run python -m src.discover.main --project_id=jotunheimen --date_from=2025-01-01 --date_to=2025-10-31 --log_level=$(log_level) --limit=$(limit) --dry_run
 
 download:
-	uv run python -m src.download.main
+	uv run python -m src.download.local --scene_id=$(scene_id)
 
 process:
 	uv run python -m src.process.main

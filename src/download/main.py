@@ -1,13 +1,12 @@
 import json
 from pathlib import Path
 from time import sleep
-from tqdm import tqdm
 
-from src.utils.stac import Stac
-from src.utils.logger import get_logger, add_log_context
-from src.utils.models import SceneStatusEnum
-from src.utils.file import prepare_folder
 from src.controller.scene import SceneController
+from src.utils.file import prepare_folder
+from src.utils.logger import add_log_context, get_logger
+from src.utils.models import SceneStatusEnum
+from src.utils.stac import Stac
 
 logger = get_logger("glacier_watch.download")
 
@@ -15,7 +14,8 @@ logger = get_logger("glacier_watch.download")
 def download_item_assets(stac: Stac, stac_href: str, download_path: Path):
     items = json.loads(stac_href)
 
-    for band_name, href in tqdm(items.items(), desc="Downloading assets"):
+    for band_name, href in items.items():
+        logger.info(f"Downloading asset {band_name} from {href} to {download_path}")
         stac.download_item_assets(
             asset_href=href, download_path=download_path / f"{band_name}.jp2"
         )
