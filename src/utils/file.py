@@ -1,18 +1,8 @@
 from pathlib import Path
 from typing import Literal
 
-import geopandas as gpd
 import rioxarray as rxr
 import xarray as xr
-from shapely.geometry import Polygon
-
-
-def load_feature_from_geojson(file_path: str, crs: str) -> Polygon:
-    gdf = gpd.read_file(file_path).to_crs(crs)
-
-    geom = gdf.geometry.iloc[0]
-
-    return geom
 
 
 def load_raster(file_path) -> xr.DataArray:
@@ -22,6 +12,28 @@ def load_raster(file_path) -> xr.DataArray:
 
 def save_raster(data_array: xr.DataArray, file_path: str):
     data_array.rio.to_raster(file_path)
+
+
+def prepare_temp_folder() -> Path:
+    temp_folder_path = Path("data/temp/")
+
+    if temp_folder_path.is_dir():
+        for file in temp_folder_path.iterdir():
+            file.unlink()
+        temp_folder_path.rmdir()
+
+    temp_folder_path.mkdir(parents=True, exist_ok=True)
+
+    return temp_folder_path
+
+
+def cleanup_temp_folder():
+    temp_folder_path = Path("data/temp/")
+
+    if temp_folder_path.is_dir():
+        for file in temp_folder_path.iterdir():
+            file.unlink()
+        temp_folder_path.rmdir()
 
 
 def prepare_folder(

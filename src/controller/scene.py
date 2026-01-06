@@ -1,8 +1,7 @@
-from typing import List, Optional
 from logging import Logger
+from typing import List, Optional
 
-
-from sqlalchemy.sql import text, select, update
+from sqlalchemy.sql import select, text, update
 
 from src.utils.db import get_session
 from src.utils.models import Scene, SceneStatusEnum
@@ -19,6 +18,13 @@ class SceneController:
                 .limit(1)
             )
             scene = session.execute(select_stmt).scalar_one_or_none()
+            return scene
+
+    @staticmethod
+    def get_scene_by_id(scene_id: str) -> Optional[Scene]:
+        with get_session() as session:
+            scene = select(Scene).where(Scene.scene_id == scene_id)
+            scene = session.execute(scene).scalar_one_or_none()
             return scene
 
     @staticmethod

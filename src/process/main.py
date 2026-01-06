@@ -1,49 +1,182 @@
-from pathlib import Path
 from argparse import ArgumentParser
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from time import sleep
+from typing import Dict, List, Literal, Optional, Tuple
 
-import geopandas as gpd
-from shapely import MultiPolygon
 from geoalchemy2.shape import to_shape
+from pyproj import CRS
+from rasterio.warp import transform_geom
+from shapely import MultiPolygon, box
+from shapely.geometry import shape
+from shapely.ops import unary_union
 
-from src.process.processing import (
-    process_bands,
-    snow_area_by_glaciers,
-    snowline_calculation,
-)
-from src.utils.db import get_session
-from src.utils.file import load_raster, prepare_folder
-from src.utils.config import CRS
-from src.utils.logger import get_logger, add_log_context
-from src.utils.models import (
-    Scene,
-    SceneStatusEnum,
-    GlaciersAnalysisResult,
-    GlacierSnowData,
-)
-from src.controller.scene import SceneController
 from src.controller.project import ProjectController
+from src.controller.scene import SceneController
+from src.process.processing import (
+    analyze_glacier_snow_area,
+    clip_raster,
+    compute_ndsi,
+    create_mask,
+    stack_bands,
+)
+from src.utils.config import load_project_config
+from src.utils.db import get_session
+from src.utils.file import (
+    cleanup_temp_folder,
+    load_raster,
+    prepare_folder,
+    prepare_temp_folder,
+)
+from src.utils.logger import add_log_context, get_logger
+from src.utils.models import Glacier, GlaciersAnalysisResult, Scene, SceneStatusEnum
 
 logger = get_logger("glacier_watch.process")
 
+PROJECT_CRS = CRS.from_epsg(4326)
 
-def main(dry_run: bool = False) -> tuple[bool, Scene]:
-    try:
-        if dry_run:
-            logger.info("Dry run mode enabled. Fetching a scene without locking.")
+
+@dataclass
+class Args:
+    scene_id: Optional[str]
+    log_level: str
+    dry_run: bool = False
+
+
+def parse_args() -> Args:
+    parser = ArgumentParser(description="Process glacier watch scenes.")
+    parser.add_argument(
+        "--scene-id",
+        type=str,
+        help="Specify a particular scene ID to process.",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        help="Set the logging level (e.g., DEBUG, INFO, WARNING, ERROR).",
+        default="INFO",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run the process without making any changes.",
+    )
+    args = parser.parse_args()
+    return Args(
+        scene_id=args.scene_id,
+        log_level=args.log_level,
+        dry_run=args.dry_run,
+    )
+
+
+def lock_and_get_scene(dry_run: bool, scene_id: Optional[str]) -> Optional[Scene]:
+    if dry_run:
+        logger.info("Dry run mode enabled. Fetching a scene without locking.")
+        if not scene_id:
             scene = SceneController.get_scene(SceneStatusEnum.queued_for_processing)
         else:
-            logger.info("Starting scene processing.")
-            scene = SceneController.lock_and_get_scene(
-                SceneStatusEnum.queued_for_processing,
-                SceneStatusEnum.processing,
-                logger,
-            )
+            scene = SceneController.get_scene_by_id(scene_id)
 
         if not scene:
             logger.info("No scenes to process. Exiting.")
-            return False, None
+            raise SystemExit(0)
+    else:
+        logger.info("Starting scene processing.")
+        scene = SceneController.lock_and_get_scene(
+            SceneStatusEnum.queued_for_processing,
+            SceneStatusEnum.processing,
+            logger,
+        )
+
+    return scene
+
+
+def validate_file_paths(
+    scene: Scene, project_config: Dict
+) -> Tuple[Path, Dict[str, Path]]:
+    dem_file_path = Path("data", scene.project_id, "dem.tif")
+
+    if not dem_file_path.is_file():
+        raise FileNotFoundError(f"DEM file not found: {dem_file_path}")
+
+    project_bands = {
+        band: Path(scene.download_path) / f"{band}.jp2"
+        for band in project_config.get("bands", [])
+    }
+
+    for _, band_path in project_bands.items():
+        if not band_path.is_file():
+            raise FileNotFoundError(f"Band file not found: {band_path}")
+
+    return dem_file_path, project_bands
+
+
+def get_scene_glaciers(
+    glaciers: List[Glacier], raster_path: Path
+) -> List[Tuple[str, MultiPolygon]]:
+    raster = load_raster(raster_path)
+    crs = raster.rio.crs
+
+    transformed_glaciers = [
+        (
+            glacier.glacier_id,
+            transform_geom(
+                PROJECT_CRS.to_string(),
+                crs.to_string(),
+                geom=to_shape(glacier.geometry).__geo_interface__,
+            ),
+        )
+        for glacier in glaciers
+    ]
+
+    raster_bounds_geom = box(*raster.rio.bounds())
+    filtered_glaciers = []
+    for glacier_id, glacier_geom in transformed_glaciers:
+        glacier_shp = MultiPolygon(shape(glacier_geom))
+
+        if glacier_shp.within(raster_bounds_geom):
+            filtered_glaciers.append((glacier_id, glacier_shp))
+
+    return filtered_glaciers
+
+
+def clip_rasters_to_glaciers(
+    raster_in_path: Path, raster_out_path: Path, glaciers_geom: MultiPolygon
+):
+    raster = load_raster(raster_in_path)
+
+    crs = raster.rio.crs
+
+    clipped_raster = clip_raster(raster, glaciers_geom, crs)
+
+    clipped_raster.rio.to_raster(raster_out_path)
+
+
+def get_band_path(project_bands: Dict[str, Path], band_name: str) -> Optional[Path]:
+    """
+    Get the file path for a specific band from the project bands dictionary. As band resolutions may vary, it matches the start of the band name.
+    So "B11" can match "B11_20m" or "B11_10m".
+
+    :param project_bands: Dictionary of band names and their file paths
+    :type project_bands: Dict[str, Path]
+    :param band_name: The band name to search for
+    :type band_name: str
+    :return: The file path of the matching band
+    """
+
+    for name, path in project_bands.items():
+        if name.startswith(band_name):
+            return path
+
+
+def main(args: Args) -> Literal["success", "failure", "no_scene"]:
+    try:
+        scene = lock_and_get_scene(args.dry_run, args.scene_id)
+
+        if not scene:
+            logger.info("No scenes to process. Exiting.")
+            return "no_scene"
 
         add_log_context(scene_id=scene.scene_id, project_id=scene.project_id)
 
@@ -53,88 +186,114 @@ def main(dry_run: bool = False) -> tuple[bool, Scene]:
 
         logger.info(f"Processing scene {scene.scene_id} from project {project.name}.")
 
-        dem_file_path = Path("data", scene.project_id, "dem.tif")
+        project_config = load_project_config(project.project_id)
 
-        aoi_geometry = MultiPolygon(to_shape(project.area_of_interest))
+        dem_file_path, project_bands = validate_file_paths(scene, project_config)
 
-        aoi_geometry = (
-            gpd.GeoSeries([aoi_geometry], crs="EPSG:4326").to_crs(CRS).iloc[0]
+        project_glaciers = ProjectController.get_glaciers_in_project(scene.project_id)
+
+        filtered_glaciers = get_scene_glaciers(
+            project_glaciers, list(project_bands.values())[0]
         )
 
-        stacked, ndsi, ndsi_mask = process_bands(
-            {
-                "B02": Path(scene.download_path) / "B02_20m.jp2",
-                "B03": Path(scene.download_path) / "B03_20m.jp2",
-                "B04": Path(scene.download_path) / "B04_20m.jp2",
-                "B11": Path(scene.download_path) / "B11_20m.jp2",
-            },
-            aoi_geometry=aoi_geometry,
+        glacier_geometries = unary_union(
+            [glacier_geom for _, glacier_geom in filtered_glaciers]
         )
+        buffered_glacier_geometries = glacier_geometries.buffer(200)
+
+        clipped_bands = {}
+
+        prepare_temp_folder()
+
+        for band_name, file_path in project_bands.items():
+            output_path = Path("data/temp") / file_path.name
+
+            clip_rasters_to_glaciers(
+                raster_in_path=file_path,
+                raster_out_path=output_path,
+                glaciers_geom=buffered_glacier_geometries,
+            )
+
+            clipped_bands[band_name] = output_path
 
         results_folder_path = prepare_folder(
             project_id=scene.project_id, scene_id=scene.scene_id, folder_type="result"
         )
 
-        stacked.rio.to_raster(results_folder_path / "stacked_sentinel2.tif")
-        ndsi.rio.to_raster(results_folder_path / "ndsi_sentinel2.tif")
-        ndsi_mask.rio.to_raster(results_folder_path / "ndsi_mask_sentinel2.tif")
+        logger.info("Processing clipped bands to compute results.")
 
-        glaciers = ProjectController.get_glaciers_in_project(scene.project_id)
-        if not glaciers:
-            raise ValueError(
-                f"No glaciers found in project {scene.project_id} area of interest."
-            )
-
-        gdf_glaciers = gpd.GeoDataFrame(
+        rgb_stacked = stack_bands(
             [
-                {
-                    "glacier_id": glacier.glacier_id,
-                    "name": glacier.name,
-                    "geometry": to_shape(glacier.geometry),
-                    "area_m2": glacier.area_m2,
-                }
-                for glacier in glaciers
-            ],
-            crs="EPSG:4326",
-        ).to_crs(CRS)
+                load_raster(get_band_path(clipped_bands, band_name))
+                for band_name in ["B04", "B03", "B02"]
+            ]
+        ).assign_coords(band=["red", "green", "blue"])
 
-        logger.info(f"Number of glaciers in project area: {len(gdf_glaciers)}")
+        rgb_stacked.rio.to_raster(results_folder_path / "true_color.tif")
 
-        total_snow_area, glacier_snow = snow_area_by_glaciers(ndsi_mask, gdf_glaciers)
+        logger.info(
+            f"RGB true color image saved to {results_folder_path / 'true_color.tif'}"
+        )
+
+        ndsi = compute_ndsi(
+            band_swir=load_raster(get_band_path(clipped_bands, "B11")),
+            band_green=load_raster(get_band_path(clipped_bands, "B03")),
+        )
+
+        ndsi.rio.to_raster(results_folder_path / "ndsi.tif")
+
+        logger.info(f"NDSI raster saved to {results_folder_path / 'ndsi.tif'}")
+
+        ndsi_mask = create_mask(ndsi, threshold=0.4)
+        ndsi_mask.rio.to_raster(results_folder_path / "ndsi_mask.tif")
+
+        logger.info(
+            f"NDSI mask raster saved to {results_folder_path / 'ndsi_mask.tif'}"
+        )
+
+        transform = ndsi_mask.rio.transform()
+        pixel_w = transform.a
+        pixel_h = -transform.e
+        pixel_area = pixel_w * pixel_h
 
         dem = load_raster(dem_file_path)
 
         dem = dem.rio.reproject_match(ndsi_mask)
 
-        snowline_elevations = snowline_calculation(gdf_glaciers, ndsi_mask, dem)
-
+        analysis_results = []
         now = datetime.now()
-        result = GlaciersAnalysisResult(
+
+        analyis = GlaciersAnalysisResult(
             id=f"{scene.scene_id}_{now.strftime('%Y%m%d%H%M%S')}",
             scene_id=scene.scene_id,
             analysis_date=now,
-            snow_area_m2=total_snow_area,
-            total_glacier_snow_area_m2=sum(
-                info["snow_area"] for info in glacier_snow.values()
-            ),
+            snow_area_m2=0.0,
+            total_glacier_snow_area_m2=0.0,
         )
 
-        glacier_snow_data_entries = []
-        for glacier_id, glacier_info in glacier_snow.items():
-            entry = GlacierSnowData(
-                id=f"{scene.scene_id}_{glacier_id}_{now.strftime('%Y%m%d%H%M%S')}",
-                analysis_id=result.id,
-                glacier_id=glacier_id,
-                scene_id=scene.scene_id,
-                snow_area_m2=glacier_info["snow_area"],
-                snowline_elevation_m=snowline_elevations.get(glacier_id, None),
-            )
-            glacier_snow_data_entries.append(entry)
+        for glacier_id, glacier_geom in filtered_glaciers:
+            try:
+                glacier_snow_data = analyze_glacier_snow_area(
+                    glacier_id=glacier_id,
+                    glacier_geom=glacier_geom,
+                    dem=dem,
+                    ndsi_mask=ndsi_mask,
+                    pixel_area=pixel_area,
+                    scene_id=scene.scene_id,
+                    analysis_id=analyis.id,
+                )
 
-        if not dry_run:
+                analyis.snow_area_m2 += glacier_snow_data.snow_area_m2
+                analysis_results.append(glacier_snow_data)
+            except Exception as e:
+                logger.warning(f"Error processing glacier {glacier_id}: {e}. Skipping.")
+                continue
+        analyis.total_glacier_snow_area_m2 = analyis.snow_area_m2
+
+        if not args.dry_run:
             with get_session() as session:
-                session.add(result)
-                session.add_all(glacier_snow_data_entries)
+                session.add(analyis)
+                session.add_all(analysis_results)
                 SceneController.update_scene_status(
                     scene,
                     SceneStatusEnum.processed,
@@ -143,73 +302,50 @@ def main(dry_run: bool = False) -> tuple[bool, Scene]:
                 )
                 session.commit()
         else:
-            logger.info(f"Total snow area: {total_snow_area} m2")
-            glacier_snow_area = 0
-            glacier_snow_json = {}
-            for glacier_id, glacier_info in glacier_snow.items():
-                snow_cover_fraction = float(
-                    glacier_info["snow_area"] / glacier_info["original_area"] * 100
-                )
-                glacier_snow_area += float(glacier_info["snow_area"])
-                logger.info(
-                    f"Glacier {glacier_info['name']} ({glacier_id}): "
-                    f"\n\tSnow area: {glacier_info['snow_area']} m2, "
-                    f"\n\tOriginal area: {glacier_info['original_area']} m2, "
-                    f"\n\tSnow cover fraction: {snow_cover_fraction:.2f}%, "
-                    f"\n\t20th percentile snowline elevation: {snowline_elevations.get(glacier_id, float('nan')):.2f} m"
-                )
-                glacier_snow_json[glacier_id] = {
-                    "name": glacier_info["name"],
-                    "snow_area_m2": float(glacier_info["snow_area"]),
-                    "original_area_m2": float(glacier_info["original_area"]),
-                    "snow_cover_fraction_percent": snow_cover_fraction,
-                    "snowline_elevation_m": float(
-                        snowline_elevations.get(glacier_id, float("nan"))
-                    ),
-                }
-            logger.info(f"Total glacier snow area: {glacier_snow_area} m2")
-            logger.info(
-                f"Snow outside glaciers: {total_snow_area - glacier_snow_area} m2"
-            )
+            logger.info(f"Total glacier snow area: {analyis.snow_area_m2} m2")
+            with open(results_folder_path / "results.txt", "w") as f:
+                f.write(f"Total glacier snow area: {analyis.snow_area_m2} m2\n")
+                for glacier_data in analysis_results:
+                    f.write(
+                        f"Glacier {glacier_data.glacier_id}: "
+                        f"Snow area: {glacier_data.snow_area_m2} m2, "
+                        f"Snowline elevation: {glacier_data.snowline_elevation_m} m\n"
+                    )
         logger.info(f"Finished processing scene {scene.scene_id}.")
-        return True, scene
+
+        cleanup_temp_folder()
+        return "success"
+
     except Exception as e:
         add_log_context(error_traceback=e.__traceback__)
-        if dry_run:
-            logger.error(f"Error during dry run: {e}")
-        else:
-            logger.error(f"Error locking scene for processing: {e}")
+        logger.error(f"Error during processing: {e}")
 
-            if scene:
-                SceneController.update_scene_status(
-                    scene,
-                    SceneStatusEnum.failed_processing,
-                    error_message=str(e),
-                )
-        return False, scene
+        if not args.dry_run and scene:
+            SceneController.update_scene_status(
+                scene,
+                SceneStatusEnum.failed_processing,
+                error_message=str(e),
+            )
+        cleanup_temp_folder()
+        return "failure"
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Process glacier watch scenes.")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Run the process without making any changes.",
-    )
-    args = parser.parse_args()
-    dry_run = args.dry_run
+    args = parse_args()
+    logger.setLevel(args.log_level.upper())
 
     while True:
-        success, scene = main(dry_run=dry_run)
-        if dry_run:
+        success = main(args)
+        if args.dry_run:
             break
-        if not scene:
-            logger.warning(
-                "No scene to process. Waiting for 60 seconds before retrying."
-            )
-            sleep(60)
-        if not success:
-            logger.warning(
-                "An error occurred during processing. Retrying in 10 seconds."
-            )
-            sleep(10)
+        match success:
+            case "success":
+                sleep(5)
+            case "no_scene":
+                logger.info(
+                    "No scenes available for processing. Waiting before retrying."
+                )
+                sleep(60)
+            case "failure":
+                logger.info("Processing failed. Waiting before retrying.")
+                sleep(10)

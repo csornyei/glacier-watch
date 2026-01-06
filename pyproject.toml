@@ -1,6 +1,6 @@
 [project]
 name = "glacier-watch-ingest"
-version = "2.2.0"
+version = "2.3.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -8,7 +8,6 @@ dependencies = [
     "alembic>=1.17.2",
     "asyncpg>=0.31.0",
     "geoalchemy2>=0.18.1",
-    "geopandas>=1.1.1",
     "httpx>=0.28.1",
     "psycopg>=3.3.2",
     "pystac-client>=0.9.0",

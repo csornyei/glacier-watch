@@ -1,8 +1,13 @@
-import geopandas as gpd
+from datetime import datetime
+
 import numpy as np
 import xarray as xr
+from shapely import MultiPolygon
 
-from src.utils.file import CRS, load_raster
+from src.utils.logger import get_logger
+from src.utils.models import GlacierSnowData
+
+logger = get_logger("glacier_watch.process")
 
 
 def clip_raster(raster: xr.DataArray, geometry, crs: str) -> xr.DataArray:
@@ -34,106 +39,34 @@ def create_mask(layer: xr.DataArray, threshold: float = 0.4) -> xr.DataArray:
     return mask
 
 
-def snow_area_by_glaciers(ndsi_mask: xr.DataArray, glaciers: gpd.GeoDataFrame) -> float:
-    raster_crs = ndsi_mask.rio.crs
-    transform = ndsi_mask.rio.transform()
-
-    pixel_width = transform.a
-    pixel_height = -transform.e
-    pixel_area = pixel_width * pixel_height
-
-    total_snow_area = int(ndsi_mask.sum().item()) * pixel_area
-    glacier_snow = {}
-
-    for _, glacier in glaciers.iterrows():
-        glacier_id = glacier["glacier_id"]
-        glacier_name = glacier["name"]
-        glacier_og_area = glacier["area_m2"]
-
-        glacier_geom = glacier["geometry"]
-        glacier_mask = ndsi_mask.rio.clip(
-            [glacier_geom],
-            raster_crs,
-            all_touched=True,
-            drop=True,
-        )
-
-        glacier_snow_area = int(glacier_mask.sum().item()) * pixel_area
-        glacier_snow[glacier_id] = {
-            "id": glacier_id,
-            "name": glacier_name,
-            "original_area": glacier_og_area,
-            "snow_area": glacier_snow_area,
-        }
-
-    return total_snow_area, glacier_snow
-
-
-def snowline_calculation(
-    glaciers: gpd.GeoDataFrame,
-    ndsi_mask: xr.DataArray,
+def analyze_glacier_snow_area(
+    glacier_id: str,
+    glacier_geom: MultiPolygon,
     dem: xr.DataArray,
-    percentile: float = 20.0,
-) -> dict[str, float]:
-    raster_crs = ndsi_mask.rio.crs
-    snowline_elevations = {}
+    ndsi_mask: xr.DataArray,
+    pixel_area: float,
+    scene_id: str,
+    analysis_id: str,
+) -> GlacierSnowData:
+    logger.info(f"Processing glacier {glacier_id}")
 
-    for _, glacier in glaciers.iterrows():
-        glacier_id = glacier["glacier_id"]
-        glacier_geom = glacier["geometry"]
+    glacier_mask = clip_raster(ndsi_mask, glacier_geom, ndsi_mask.rio.crs)
+    clipped_dem = clip_raster(dem, glacier_geom, dem.rio.crs)
 
-        clipped_ndsi = ndsi_mask.rio.clip(
-            [glacier_geom],
-            raster_crs,
-            all_touched=True,
-            drop=True,
-        )
+    glacier_snow_area = int(glacier_mask.sum().item()) * pixel_area
 
-        clipped_dem = dem.rio.clip(
-            [glacier_geom],
-            raster_crs,
-            all_touched=True,
-            drop=True,
-        )
+    snow_elevations = clipped_dem.where(glacier_mask).values.flatten()
+    snow_elevations = snow_elevations[np.isfinite(snow_elevations)]
 
-        snow_elevations = clipped_dem.where(clipped_ndsi).values.flatten()
-        snow_elevations = snow_elevations[np.isfinite(snow_elevations)]
+    snowline_elevation = np.percentile(snow_elevations, 20)
 
-        if len(snow_elevations) == 0:
-            snowline_elevations[glacier_id] = float("nan")
-            continue
-
-        snowline_elevation = np.percentile(snow_elevations, percentile)
-        snowline_elevations[glacier_id] = snowline_elevation
-
-    return snowline_elevations
-
-
-def process_bands(
-    bands: dict[str, str], aoi_geometry
-) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
-    """
-    Process the ingested bands (RGB and SWIR) to compute stacked data, NDSI, and NDSI mask.
-
-    :param bands: Ingested bands with names and file paths
-    :type bands: dict[str, str]
-    :param aoi_geojson_path: Path to the GeoJSON file defining the area of interest
-    :type aoi_geojson_path: Path
-    :return: Stacked bands, NDSI, and NDSI mask
-    :rtype: tuple[xr.DataArray, xr.DataArray, xr.DataArray]
-    """
-
-    bands_dataarrays = {
-        band_name: clip_raster(load_raster(file_path), aoi_geometry, CRS)
-        for band_name, file_path in bands.items()
-    }
-
-    stacked = stack_bands(list(bands_dataarrays.values())).assign_coords(
-        band=list(bands_dataarrays.keys())
+    result = GlacierSnowData(
+        id=f"{scene_id}_{glacier_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        analysis_id=analysis_id,
+        glacier_id=glacier_id,
+        scene_id=scene_id,
+        snow_area_m2=glacier_snow_area,
+        snowline_elevation_m=snowline_elevation,
     )
 
-    ndsi = compute_ndsi(bands_dataarrays["B03"], bands_dataarrays["B11"])
-
-    ndsi_mask = create_mask(ndsi, threshold=0.4)
-
-    return stacked, ndsi, ndsi_mask
+    return result

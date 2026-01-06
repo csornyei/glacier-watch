@@ -10,8 +10,8 @@ download:
 process:
 	uv run python -m src.process.main
 
-process-dr:
-	uv run python -m src.process.main --dry-run
+process-dry:
+	uv run python -m src.process.main --dry-run --scene-id=$(scene_id)
 
 dem:
 	uv run python -m src.dem.main --project_id=jotunheimen --log_level=$(log_level)
