@@ -28,6 +28,12 @@ def download_scene(stac: Stac) -> bool:
         )
 
         if scene is None:
+            logger.info("No scenes to download, checking for reattempts.")
+            scene = SceneController.reattempt_failed_scene(
+                SceneStatusEnum.failed_download, logger=logger, max_attempts=5
+            )
+
+        if scene is None:
             logger.info("No scenes to download.")
             return False
 

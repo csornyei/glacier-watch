@@ -82,6 +82,59 @@ class SceneController:
         return row
 
     @staticmethod
+    def reattempt_failed_scene(
+        failed_status: SceneStatusEnum, logger: Logger, max_attempts: int = 3
+    ) -> Optional[Scene]:
+        if failed_status not in {
+            SceneStatusEnum.failed_download,
+            SceneStatusEnum.failed_processing,
+        }:
+            logger.error(f"Invalid failed status: {failed_status}")
+            return None
+
+        with get_session() as session:
+            row = session.execute(
+                text(
+                    """
+                        SELECT * FROM scene
+                        WHERE status = :status AND attempts_download < :max_attempts
+                        ORDER BY updated_at ASC
+                        LIMIT 1
+                        FOR UPDATE SKIP LOCKED
+                    """
+                ),
+                params={"status": failed_status, "max_attempts": max_attempts},
+            ).first()
+
+            if row is None:
+                logger.info("No failed download scenes to reattempt.")
+                return None
+
+            new_status = (
+                SceneStatusEnum.downloading
+                if failed_status == SceneStatusEnum.failed_download
+                else SceneStatusEnum.processing
+            )
+
+            session.execute(
+                text(
+                    """
+                        UPDATE scene
+                        SET status = :new_status, updated_at = CURRENT_TIMESTAMP
+                        WHERE scene_id = :scene_id
+                    """
+                ),
+                params={
+                    "scene_id": row.scene_id,
+                    "new_status": new_status,
+                },
+            )
+            session.commit()
+
+            logger.info(f"Reattempting download for scene: {row.scene_id}")
+            return row
+
+    @staticmethod
     def update_scene_status(
         scene: Scene,
         new_status: SceneStatusEnum,

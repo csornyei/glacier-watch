@@ -89,6 +89,12 @@ def lock_and_get_scene(dry_run: bool, scene_id: Optional[str]) -> Optional[Scene
             logger,
         )
 
+        if scene is None:
+            logger.info("No new scenes to process, checking for reattempts.")
+            scene = SceneController.reattempt_failed_scene(
+                SceneStatusEnum.failed_processing, logger=logger, max_attempts=3
+            )
+
     return scene
 
 
@@ -175,7 +181,7 @@ def main(args: Args) -> Literal["success", "failure", "no_scene"]:
         scene = lock_and_get_scene(args.dry_run, args.scene_id)
 
         if not scene:
-            logger.info("No scenes to process. Exiting.")
+            logger.info("No scenes to process.")
             return "no_scene"
 
         add_log_context(scene_id=scene.scene_id, project_id=scene.project_id)
