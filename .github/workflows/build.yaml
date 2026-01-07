@@ -44,6 +44,8 @@ jobs:
 
       - name: Check if image with version exists
         id: check_image
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           response=$(gh api /users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions)
 
