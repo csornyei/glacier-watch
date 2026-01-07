@@ -41,7 +41,19 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
+      - name: Check if image with version exists
+        id: check_image
+        run: |
+          response=$(gh api /users/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions)
+
+          if echo "$response" | jq -e '.[] | select(.name == "${{ steps.read_version.outputs.value }}")' > /dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Image with this version already exists. Skipping build."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
